@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dealer Authentication</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+    
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Removed Firebase SDKs for dummy OTP implementation -->
+    
+    <script src="config.js" defer></script>
+    <script src="script.js" defer></script>
+    <script src="dealer-auth.js" defer></script>
+</head>
+<body>
+    <div class="lang-selector">
+        <span class="globe-icon">🌐</span>
+        <select id="languageSelect">
+            <option value="en">English</option>
+            <option value="hi">हिन्दी</option>
+            <option value="te">తెలుగు</option>
+            <option value="ta">தமிழ்</option>
+            <option value="kn">ಕನ್ನಡ</option>
+            <option value="ml">മലയാളം</option>
+            <option value="mr">मराठी</option>
+        </select>
+    </div>
+    
+    <div class="auth-container">
+        <div class="auth-box card">
+            <div class="auth-tabs">
+                <button class="auth-tab active" id="tab-login" data-i18n="authLoginTab">Login</button>
+                <button class="auth-tab" id="tab-signup" data-i18n="authSignupTab">Sign Up</button>
+            </div>
+
+            <!-- Login Form -->
+            <form id="login-form" class="auth-form active">
+                <h2 style="margin-bottom: 1.5rem; text-align: center; color: #f1f5f9;" data-i18n="loginTitle">Dealer Login</h2>
+                
+                <div class="input-group">
+                    <label data-i18n="mobileLabel">Mobile Number *</label>
+                    <input type="tel" id="login-phone" required placeholder="Enter your mobile number" data-i18n-placeholder="mobilePlaceholder">
+                </div>
+
+                <div class="input-group">
+                    <label data-i18n="passwordLabel">Password *</label>
+                    <input type="password" id="login-password" required placeholder="Enter your password">
+                </div>
+                
+                <!-- Recaptcha removed -->
+                
+                <button type="submit" id="btn-login-submit" class="btn btn-dealer" data-i18n="loginBtn" style="margin-top: 1rem; width: 100%;">Login</button>
+                
+                <p id="login-status" style="margin-top: 1rem; font-size: 0.9rem; text-align: center; color: #ef4444;"></p>
+                
+                <div style="margin-top: 1.5rem; text-align: center;">
+                    <a href="index.html" class="back-link" data-i18n="backLink">&larr; Back to Role Selection</a>
+                </div>
+            </form>
+
+            <!-- Signup Form -->
+            <form id="signup-form" class="auth-form">
+                <h2 style="margin-bottom: 1.5rem; text-align: center; color: #f1f5f9;" data-i18n="signupTitle">Dealer Registration</h2>
+                
+                <div class="input-group">
+                    <label data-i18n="nameLabel">Full Name *</label>
+                    <input type="text" id="signup-name" required placeholder="Enter full name" data-i18n-placeholder="namePlaceholder">
+                </div>
+                
+                <div class="input-group">
+                    <label data-i18n="shopLabel">Shop Name *</label>
+                    <input type="text" id="signup-shop" required placeholder="Enter shop name" data-i18n-placeholder="shopPlaceholder">
+                </div>
+                
+                <div class="input-group">
+                    <label data-i18n="categoryLabel">Business Category *</label>
+                    <select id="signup-category" required>
+                        <option value="" data-i18n="catDefault">Select Category</option>
+                        <option value="electronics" data-i18n="catElectronics">Electronics</option>
+                        <option value="grocery" data-i18n="catGrocery">Grocery & FMCG</option>
+                        <option value="clothing" data-i18n="catClothing">Clothing & Apparel</option>
+                        <option value="hardware" data-i18n="catHardware">Hardware</option>
+                        <option value="other" data-i18n="catOther">Other</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label data-i18n="gstLabel">GST Number</label>
+                    <div class="input-with-button">
+                        <input type="text" id="gst-input" placeholder="Enter GST Number" maxlength="15" data-i18n-placeholder="gstPlaceholder">
+                        <button type="button" id="btn-verify-gst" class="btn btn-small" data-i18n="gstVerifyBtn">Verify</button>
+                    </div>
+                    <span id="gst-status" class="status-message"></span>
+                </div>
+                
+                <div class="input-group">
+                    <label data-i18n="mobileLabel">Mobile Number *</label>
+                    <input type="tel" id="signup-phone" required placeholder="Enter mobile number" data-i18n-placeholder="mobilePlaceholder">
+                </div>
+
+                <div class="input-group">
+                    <label data-i18n="passwordLabel">Password *</label>
+                    <input type="password" id="signup-password" required placeholder="Set your password" data-i18n-placeholder="passwordPlaceholder">
+                </div>
+
+                <hr class="divider">
+                <h3 style="margin-bottom: 1rem; font-size: 1.1rem; color: #f1f5f9; text-align: left;" data-i18n="locDetailsTitle">Location Details</h3>
+                
+                <button type="button" id="btn-location" class="btn btn-location" data-i18n="btnLocation">Use My Current Location 📍</button>
+
+                <div class="input-group">
+                    <label data-i18n="addressLabel">Shop Address *</label>
+                    <textarea id="address" required placeholder="Enter full shop address" rows="3" data-i18n-placeholder="addressPlaceholder"></textarea>
+                </div>
+                
+                <div class="input-row">
+                    <div class="input-group">
+                        <label data-i18n="cityLabel">City *</label>
+                        <input type="text" id="city" required placeholder="City" data-i18n-placeholder="cityPlaceholder">
+                    </div>
+                    <div class="input-group">
+                        <label data-i18n="stateLabel">State *</label>
+                        <input type="text" id="state" required placeholder="State" data-i18n-placeholder="statePlaceholder">
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label data-i18n="pincodeLabel">Pincode *</label>
+                    <input type="text" id="pincode" required placeholder="Pincode" data-i18n-placeholder="pincodePlaceholder">
+                </div>
+                
+                <!-- Recaptcha removed -->
+                
+                <button type="button" id="btn-signup-send-otp" class="btn btn-dealer" style="margin-bottom: 1rem; width: 100%;">Send OTP</button>
+
+                <div class="input-group" id="signup-otp-group" style="display: none;">
+                    <label>Enter OTP *</label>
+                    <input type="text" id="signup-otp" placeholder="Enter OTP received on SMS" maxlength="6">
+                </div>
+                
+                <button type="submit" id="btn-signup-verify" class="btn btn-dealer" style="margin-top: 1.5rem; display: none; width: 100%;" data-i18n="signupBtn">Create Dealer Account</button>
+                
+                <p id="signup-status" style="margin-top: 1rem; font-size: 0.9rem; text-align: center; color: #ef4444;"></p>
+                
+                <div style="margin-top: 1.5rem; text-align: center;">
+                    <a href="index.html" class="back-link" data-i18n="backLink">&larr; Back to Role Selection</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
