@@ -127,9 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 setTimeout(() => {
                     if (window.location.protocol === 'file:') {
-                        window.location.href = '../index.html';
+                        window.location.href = '../index.html#/';
                     } else {
-                        window.location.href = '/';
+                        window.location.href = '/#/';
                     }
                 }, 500);
 

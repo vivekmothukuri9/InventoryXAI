@@ -120,7 +120,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 loginStatus.textContent = 'Logged in successfully!';
                 
                 setTimeout(() => {
-                    window.location.href = '/';
+                    if (window.location.protocol === 'file:') {
+                        window.location.href = '../index.html#/';
+                    } else {
+                        window.location.href = '/#/';
+                    }
                 }, 500);
 
             } catch (error) {

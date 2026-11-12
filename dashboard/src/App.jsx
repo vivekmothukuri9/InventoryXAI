@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { supabase } from './services/supabase';
 import Dashboard from './pages/Dashboard';
 import CityNetwork from './pages/CityNetwork';
@@ -57,7 +57,7 @@ const AuthGuard = ({ children }) => {
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AuthGuard>
         <ProductTourProvider>
           <Routes>
@@ -78,7 +78,7 @@ function App() {
           <ProductTour />
         </ProductTourProvider>
       </AuthGuard>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 
