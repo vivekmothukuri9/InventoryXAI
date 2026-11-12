@@ -4,7 +4,9 @@ const path = require('path');
 const isDev = !app.isPackaged;
 
 function createWindow() {
-  const iconPath = path.join(__dirname, 'build', 'icon.png');
+  const iconPath = process.platform === 'win32'
+    ? path.join(__dirname, 'build', 'icon.ico')
+    : path.join(__dirname, 'build', 'icon.png');
 
   const win = new BrowserWindow({
     title: 'InventoryX AI',

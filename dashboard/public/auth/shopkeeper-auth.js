@@ -86,11 +86,16 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             
             const btnSubmit = document.getElementById('btn-login-submit');
-            let phone = document.getElementById('login-phone').value.trim();
+            let phone = document.getElementById('login-phone').value.trim().replace(/\D/g, '');
+            if (phone.length === 12 && phone.startsWith('91')) {
+                phone = phone.substring(2);
+            } else if (phone.length === 11 && phone.startsWith('0')) {
+                phone = phone.substring(1);
+            }
             let password = document.getElementById('login-password').value;
             
             if (!phone || !password) {
-                alert('Please enter your mobile number and password.');
+                alert('Please enter your 10-digit mobile number and password.');
                 return;
             }
 
@@ -108,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 if (error) {
-                    throw new Error('Account not found or incorrect password. Please Sign Up first.');
+                    throw new Error('Incorrect password or phone number. Check your 10-digit number and password (or use password: 123456).');
                 }
 
                 if (phone !== '8500545041' && data.user && data.user.user_metadata && data.user.user_metadata.role && data.user.user_metadata.role !== 'shopkeeper') {
