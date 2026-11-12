@@ -8,7 +8,7 @@ import DealerDashboard from '../components/DealerDashboard';
 const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [userRole, setUserRole] = useState('dealer');
+  const [userRole, setUserRole] = useState(() => localStorage.getItem('user_role') || 'shopkeeper');
 
   const fetchRole = async () => {
     setLoading(true);
@@ -17,18 +17,29 @@ const Dashboard = () => {
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session?.user) throw new Error("Authentication required.");
 
-      const { data: dealerData, error: dealerError } = await supabase
+      // Check localStorage first
+      const storedRole = localStorage.getItem('user_role');
+      if (storedRole) {
+        setUserRole(storedRole);
+        setLoading(false);
+        return;
+      }
+
+      // Check database or user metadata
+      const { data: dealerData } = await supabase
         .from('dealers')
         .select('role')
         .eq('user_id', session.user.id)
         .single();
         
-      if (dealerError) throw dealerError;
-      setUserRole(dealerData.role || 'dealer');
+      const effectiveRole = session.user.user_metadata?.role || dealerData?.role || 'shopkeeper';
+      setUserRole(effectiveRole);
+      localStorage.setItem('user_role', effectiveRole);
 
     } catch (err) {
-      console.error(err);
-      setError(err.message || "Failed to load dashboard profile");
+      console.warn("Using fallback role:", err);
+      const fallbackRole = localStorage.getItem('user_role') || 'shopkeeper';
+      setUserRole(fallbackRole);
     } finally {
       setLoading(false);
     }
@@ -36,6 +47,14 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchRole();
+
+    const handleRoleChanged = () => {
+      const updated = localStorage.getItem('user_role') || 'shopkeeper';
+      setUserRole(updated);
+    };
+
+    window.addEventListener('roleChanged', handleRoleChanged);
+    return () => window.removeEventListener('roleChanged', handleRoleChanged);
   }, []);
 
   if (loading) {

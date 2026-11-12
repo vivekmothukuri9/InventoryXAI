@@ -1,4 +1,7 @@
 {
+  "name": "inventoryxai-root",
+  "version": "1.0.0",
+  "description": "InventoryX AI",
   "dependencies": {
     "@supabase/supabase-js": "^2.112.2",
     "firebase": "^12.17.1"

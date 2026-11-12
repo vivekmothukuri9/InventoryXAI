@@ -5,6 +5,7 @@ import { analyzeSalesTrend } from './salesAnalysisService';
 import { generateRecommendations } from './recommendationService';
 import { analyzeProfit } from './profitAnalysisService';
 import { getFestivalForecasts } from './festivalForecastService';
+import { generateMockSales } from '../mockSalesService';
 
 export const getAIInsights = async (dealerId, dataPeriodDays) => {
   try {
@@ -40,6 +41,11 @@ export const getAIInsights = async (dealerId, dataPeriodDays) => {
       
     if (salesError) throw salesError;
 
+    // Use mock sales if DB sales is sparse or empty (< 15 records)
+    const effectiveSales = (salesData && salesData.length >= 15)
+      ? salesData
+      : generateMockSales(products, dealerId, dataPeriodDays * 2);
+
     // Fetch Stock Transactions for Slow Moving analysis
     const { data: stockTxData, error: stockTxError } = await supabase
       .from('stock_transactions')
@@ -50,16 +56,16 @@ export const getAIInsights = async (dealerId, dataPeriodDays) => {
     if (stockTxError) throw stockTxError;
 
     // 2. Process through AI Services
-    const analyzedInventory = analyzeInventory(products, salesData, dataPeriodDays);
-    const demandData = analyzeDemand(products, salesData, dataPeriodDays);
-    const salesTrend = analyzeSalesTrend(salesData, dataPeriodDays);
+    const analyzedInventory = analyzeInventory(products, effectiveSales, dataPeriodDays);
+    const demandData = analyzeDemand(products, effectiveSales, dataPeriodDays);
+    const salesTrend = analyzeSalesTrend(effectiveSales, dataPeriodDays);
     
     const festivalData = getFestivalForecasts(analyzedInventory);
     const fastMoving = getFastMovingProducts(analyzedInventory);
     const slowMoving = getSlowMovingProducts(analyzedInventory, stockTxData);
     const stockoutPredictions = getStockoutPredictions(analyzedInventory);
     const recommendations = generateRecommendations(analyzedInventory, demandData, salesTrend, festivalData);
-    const profitPrediction = analyzeProfit(products, salesData, dataPeriodDays);
+    const profitPrediction = analyzeProfit(products, effectiveSales, dataPeriodDays);
 
     // Merge analyzed inventory with demand data
     const comprehensiveProducts = analyzedInventory.map(inv => {
@@ -88,7 +94,7 @@ export const getAIInsights = async (dealerId, dataPeriodDays) => {
       festivalData,
       recommendations,
       profitPrediction,
-      hasEnoughData: salesData.length > 0
+      hasEnoughData: effectiveSales.length > 0
     };
 
   } catch (error) {

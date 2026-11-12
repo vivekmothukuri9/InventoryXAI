@@ -13,8 +13,10 @@ dashboard/.env.*
 # Production builds
 dist/
 dist-ssr/
+dist-electron/
 dashboard/dist/
 dashboard/dist-ssr/
+dashboard/dist-electron/
 
 # Logs
 logs

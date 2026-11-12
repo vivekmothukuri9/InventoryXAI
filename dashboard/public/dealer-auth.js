@@ -248,6 +248,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (dbError) throw dbError;
 
+                    try {
+                        localStorage.setItem('inventoryx_just_registered', 'true');
+                    } catch (e) {}
+
                     signupStatus.style.color = '#34d399';
                     signupStatus.textContent = 'Account created successfully!';
                     

@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../services/supabase';
-import { Settings as SettingsIcon, Save, User, Building, Phone, MapPin } from 'lucide-react';
+import { Settings as SettingsIcon, Save, User, Building, Phone, MapPin, Compass, HelpCircle } from 'lucide-react';
+import { useProductTour } from '../context/ProductTourContext';
 
 const Settings = () => {
+  let tour = null;
+  try {
+    tour = useProductTour();
+  } catch (e) {}
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -201,7 +207,7 @@ const Settings = () => {
               <button
                 type="submit"
                 disabled={saving}
-                className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-70"
+                className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-70 shadow-sm"
               >
                 {saving ? (
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -213,6 +219,34 @@ const Settings = () => {
             </div>
           </form>
         </div>
+
+        {/* Help & Product Tour Section */}
+        {tour && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-violet-50 text-violet-600 rounded-2xl flex items-center justify-center border border-violet-100 shrink-0">
+                <Compass size={24} />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-violet-600 bg-violet-50 px-2.5 py-0.5 rounded-full mb-1 inline-block">
+                  Interactive Guide
+                </span>
+                <h3 className="text-base font-bold text-slate-900">Side Navigation Walkthrough</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Need a refresher? Learn how each sidebar module works: Dashboard, Inventory, Products, Billing, Orders & AI Insights.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => tour.startTour(0)}
+              className="btn bg-violet-600 hover:bg-violet-700 text-white px-5 py-2.5 text-xs font-bold rounded-xl shadow-md shadow-violet-500/20 flex items-center gap-2 whitespace-nowrap transition-transform active:scale-95"
+            >
+              <Compass size={16} />
+              Take Product Tour
+            </button>
+          </div>
+        )}
       </div>
     </Layout>
   );

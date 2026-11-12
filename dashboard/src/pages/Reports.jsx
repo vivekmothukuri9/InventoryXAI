@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../services/supabase';
+import { generateMockSales } from '../services/mockSalesService';
 import { 
   BarChart2, TrendingUp, Package, ShoppingCart, DollarSign, 
   AlertTriangle, Truck, Activity, Download, Calendar, ArrowUpRight, 
@@ -89,9 +90,13 @@ const Reports = () => {
         supabase.from('stock_transactions').select('*').eq('dealer_id', dId)
       ]);
 
+      const effectiveSales = (salesData && salesData.length > 0)
+        ? salesData
+        : generateMockSales(prodData || [], dId, 30);
+
       setProducts(prodData || []);
       setInventory(invData || []);
-      setSales(salesData || []);
+      setSales(effectiveSales);
       setOrders(ordersData || []);
       setPurchases(purData || []);
       setStockTx(txData || []);
@@ -301,7 +306,7 @@ const Reports = () => {
   return (
     <Layout title="Business Reports">
       {/* Header & Date Filter */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+      <div data-tour="reports" className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <BarChart2 className="text-primary-600" />

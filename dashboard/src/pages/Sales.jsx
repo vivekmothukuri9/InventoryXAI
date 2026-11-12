@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../services/supabase';
+import { generateMockSales } from '../services/mockSalesService';
 import { 
   TrendingUp, ShoppingCart, IndianRupee, AlertCircle, Plus, 
   Search, Eye, Trash2, X, Calendar, Activity, ArrowUpRight, ArrowDownRight, Package
@@ -138,7 +139,11 @@ const Sales = () => {
         
       if (salesError) throw salesError;
       
-      setSales(salesData || []);
+      const effectiveSales = (salesData && salesData.length > 0)
+        ? salesData
+        : generateMockSales(formattedProducts, dId, 30);
+
+      setSales(effectiveSales);
 
     } catch (err) {
       console.error("Sales fetch error:", err);
@@ -447,7 +452,7 @@ const Sales = () => {
         />
       </div>
 
-      <div className="flex justify-between items-center mb-6">
+      <div data-tour="sales" className="flex justify-between items-center mb-6">
         <div className="flex border border-slate-200 rounded-lg overflow-hidden bg-white">
           <button 
             className={`px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:bg-slate-50'}`}

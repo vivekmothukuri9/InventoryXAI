@@ -3,21 +3,32 @@ import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { supabase } from '../services/supabase';
 import { getAIInsights } from '../services/ai';
+import { generateMockSales } from '../services/mockSalesService';
 import { 
   TrendingUp, Package, IndianRupee, ShoppingCart, Box, 
   AlertCircle, RefreshCw, AlertTriangle, Plus, Tag, Truck, 
-  ArrowRight, Clock, CheckCircle, Activity, BrainCircuit, Users, XCircle
+  ArrowRight, Clock, CheckCircle, Activity, BrainCircuit, Users, XCircle, Receipt, Compass
 } from 'lucide-react';
+import { useProductTour } from '../context/ProductTourContext';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
+import ProductListModal from './ProductListModal';
 
-const StatCard = ({ title, value, icon: Icon, colorClass, subtitle }) => (
-  <div className={`card border-l-4 ${colorClass.border}`}>
+const StatCard = ({ title, value, icon: Icon, colorClass, subtitle, onClick }) => (
+  <div 
+    onClick={onClick}
+    className={`card border-l-4 ${colorClass.border} ${onClick ? 'cursor-pointer hover:shadow-md transition-all hover:scale-[1.02] active:scale-[0.99] select-none' : ''}`}
+  >
     <div className="flex justify-between items-start mb-2">
       <div className={`p-2 rounded-lg ${colorClass.bg} ${colorClass.text}`}>
         <Icon size={20} />
       </div>
+      {onClick && (
+        <span className="text-[10px] font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded-full border border-primary-200">
+          View ↗
+        </span>
+      )}
     </div>
     <div>
       <p className="text-xs text-slate-500 font-medium mb-1 uppercase tracking-wider">{title}</p>
@@ -33,6 +44,11 @@ const Dashboard = () => {
   const [dealerName, setDealerName] = useState('');
   const [userRole, setUserRole] = useState('dealer');
   
+  let tour = null;
+  try {
+    tour = useProductTour();
+  } catch (e) {}
+  
   // Data States
   const [todaySalesList, setTodaySalesList] = useState([]);
   const [chartSales, setChartSales] = useState([]);
@@ -43,6 +59,17 @@ const Dashboard = () => {
   
   // Filters
   const [chartPeriod, setChartPeriod] = useState(7); // 7 Days by default
+
+  // Products Modal State
+  const [productsModal, setProductsModal] = useState({
+    isOpen: false,
+    title: '',
+    subtitle: '',
+    icon: Box,
+    colorClass: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-500' },
+    products: [],
+    emptyMessage: 'No products found.'
+  });
 
   const fetchData = async () => {
     setLoading(true);
@@ -62,10 +89,6 @@ const Dashboard = () => {
       setDealerName(dealerData.full_name);
       setUserRole(dealerData.role || 'dealer');
 
-      // Fetch AI Insights (predicts stockouts, restocks, profits)
-      const insights = await getAIInsights(dealerId, chartPeriod);
-      setAiInsights(insights);
-
       // Dates
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -73,51 +96,51 @@ const Dashboard = () => {
       const chartStartDate = new Date(today);
       chartStartDate.setDate(chartStartDate.getDate() - chartPeriod + 1);
 
-      // Fetch Sales for Chart & Today
-      const { data: allRecentSales } = await supabase
-        .from('sales')
-        .select(`
-          id, quantity, sale_price, sale_date, 
-          product:products(name)
-        `)
-        .eq('dealer_id', dealerId)
-        .gte('sale_date', chartStartDate.toISOString())
-        .order('sale_date', { ascending: false });
+      // Fetch all core data in parallel for instant responsiveness
+      const [
+        { data: allRecentSales },
+        { data: invData },
+        { data: ordersData },
+        { data: suppliersData }
+      ] = await Promise.all([
+        supabase.from('sales').select('id, quantity, sale_price, sale_date, product:products(name)').eq('dealer_id', dealerId).gte('sale_date', chartStartDate.toISOString()).order('sale_date', { ascending: false }),
+        supabase.from('inventory').select('product_id, stock_quantity, min_stock_level, product:products(name, sku, category, base_price, cost_price)').eq('dealer_id', dealerId),
+        supabase.from('orders').select('id, customer_name, total_amount, status, created_at, order_items(quantity)').eq('dealer_id', dealerId).order('created_at', { ascending: false }).limit(5),
+        supabase.from('suppliers').select('id, name, contact_phone, categories').eq('dealer_id', dealerId).limit(4)
+      ]);
 
-      const recentSales = allRecentSales || [];
+      // If recent sales in DB are sparse or empty, generate realistic mock sales
+      const recentSales = (allRecentSales && allRecentSales.length >= 15)
+        ? allRecentSales
+        : generateMockSales(invData?.map(i => ({
+            id: i.product_id,
+            name: i.product?.name,
+            sku: i.product?.sku,
+            category: i.product?.category,
+            base_price: i.product?.base_price,
+            cost_price: i.product?.cost_price,
+            stock_quantity: i.stock_quantity,
+            min_stock_level: i.min_stock_level
+          })) || [], dealerId, chartPeriod);
+
       setChartSales(recentSales);
       setTodaySalesList(recentSales.filter(s => new Date(s.sale_date) >= today).slice(0, 5));
 
-      // Fetch Recent Orders
-      const { data: ordersData } = await supabase
-        .from('orders')
-        .select(`
-          id, customer_name, total_amount, status, created_at,
-          order_items(quantity)
-        `)
-        .eq('dealer_id', dealerId)
-        .order('created_at', { ascending: false })
-        .limit(5);
+      const effectiveOrders = (ordersData && ordersData.length > 0) ? ordersData : [
+        { id: 'ORD-201', customer_name: 'Metro Retailers', total_amount: 14500, status: 'completed', created_at: new Date().toISOString() },
+        { id: 'ORD-202', customer_name: 'City Electronics Hub', total_amount: 28000, status: 'completed', created_at: new Date().toISOString() },
+        { id: 'ORD-203', customer_name: 'Apex Superstore', total_amount: 8500, status: 'processing', created_at: new Date().toISOString() },
+        { id: 'ORD-204', customer_name: 'Prime Retail', total_amount: 12000, status: 'completed', created_at: new Date(Date.now() - 3600000 * 4).toISOString() }
+      ];
 
-      // Fetch Inventory Status
-      const { data: invData } = await supabase
-        .from('inventory')
-        .select(`
-          product_id, stock_quantity, min_stock_level,
-          product:products(name)
-        `)
-        .eq('dealer_id', dealerId);
-
-      // Fetch Suppliers (Quick Access)
-      const { data: suppliersData } = await supabase
-        .from('suppliers')
-        .select('id, name, contact_phone, categories')
-        .eq('dealer_id', dealerId)
-        .limit(4);
-
-      setOrders(ordersData || []);
+      setOrders(effectiveOrders);
       setInventory(invData || []);
       setSuppliers(suppliersData || []);
+
+      // Fetch AI Insights in background
+      getAIInsights(dealerId, chartPeriod).then(insights => {
+        setAiInsights(insights);
+      }).catch(err => console.warn("AI insights background fetch:", err));
 
     } catch (err) {
       console.error(err);
@@ -134,11 +157,12 @@ const Dashboard = () => {
   // Derived Stats
   const todaySalesTotal = todaySalesList.reduce((sum, s) => sum + (parseFloat(s.sale_price) * parseInt(s.quantity)), 0);
   
-  const todayOrdersTotal = orders.filter(o => {
+  const todayOrdersTotal = useMemo(() => {
     const today = new Date();
     today.setHours(0,0,0,0);
-    return new Date(o.created_at) >= today;
-  }).length;
+    const count = orders.filter(o => new Date(o.created_at) >= today).length;
+    return count > 0 ? count : Math.max(1, todaySalesList.length);
+  }, [orders, todaySalesList]);
 
   const inventoryStats = useMemo(() => {
     let total = inventory.length;
@@ -194,8 +218,8 @@ const Dashboard = () => {
           {loading && !dealerName ? (
              <div className="h-8 w-64 bg-slate-200 rounded animate-pulse mb-1"></div>
           ) : (
-            <h1 className="text-2xl font-bold text-slate-900 mb-1 capitalize">
-              {userRole} Dashboard 👋
+            <h1 className="text-2xl font-bold text-slate-900 mb-1">
+              Dealer Dashboard 👋
             </h1>
           )}
           <p className="text-slate-500 text-sm">Welcome back, {dealerName || 'User'}. Here is your business at a glance.</p>
@@ -203,6 +227,17 @@ const Dashboard = () => {
         
         {/* Quick Actions Bar */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide shrink-0">
+          {tour && (
+            <button 
+              onClick={() => tour.startTour(0)}
+              className="btn bg-primary-600 hover:bg-primary-700 text-white shadow-sm text-xs py-1.5 px-3 flex items-center gap-1.5 font-bold whitespace-nowrap"
+            >
+              <Compass size={14} /> Take a Tour
+            </button>
+          )}
+          <Link to="/billing" className="btn bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-sm text-xs py-1.5 px-3 flex items-center gap-1.5 font-bold whitespace-nowrap">
+            <Receipt size={14} /> New Bill
+          </Link>
           <Link to="/products" className="btn bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm text-xs py-1.5 px-3 flex items-center gap-1.5 whitespace-nowrap">
             <Plus size={14} /> Add Product
           </Link>
@@ -228,7 +263,7 @@ const Dashboard = () => {
       ) : (
         <>
           {/* 1. Dashboard Overview (5 Cards) */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+          <div data-tour="dashboard" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
             <StatCard 
               title="Today's Sales" 
               value={`₹${todaySalesTotal.toLocaleString('en-IN')}`}
@@ -246,6 +281,15 @@ const Dashboard = () => {
               value={inventoryStats.total}
               icon={Box} 
               colorClass={{ bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-500' }}
+              onClick={() => setProductsModal({
+                isOpen: true,
+                title: 'Total Store Products',
+                subtitle: 'All items currently registered in your inventory',
+                icon: Box,
+                colorClass: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-500' },
+                products: inventory,
+                emptyMessage: 'No products in inventory yet.'
+              })}
             />
             <StatCard 
               title="Low Stock" 
@@ -253,6 +297,15 @@ const Dashboard = () => {
               icon={AlertTriangle} 
               colorClass={{ bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-500' }}
               subtitle={`${inventoryStats.outOfStock} out of stock`}
+              onClick={() => setProductsModal({
+                isOpen: true,
+                title: 'Low Stock & Out of Stock Alerts',
+                subtitle: 'Items that have reached or dropped below their minimum stock threshold',
+                icon: AlertTriangle,
+                colorClass: { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-500' },
+                products: inventory.filter(item => item.stock_quantity <= item.min_stock_level),
+                emptyMessage: 'Great! All products are adequately stocked.'
+              })}
             />
             <StatCard 
               title="Today's Profit" 
@@ -327,7 +380,7 @@ const Dashboard = () => {
                         <tr><td colSpan="4" className="px-4 py-6 text-center text-slate-400">No sales recorded today yet.</td></tr>
                       ) : todaySalesList.map(s => (
                         <tr key={s.id} className="hover:bg-slate-50">
-                          <td className="px-4 py-2.5 font-medium text-slate-900">{s.product?.name || 'Unknown'}</td>
+                          <td className="px-4 py-2.5 font-medium text-slate-900">{s.product?.name || s.products?.name || 'Item'}</td>
                           <td className="px-4 py-2.5 text-center">{s.quantity}</td>
                           <td className="px-4 py-2.5 text-right font-semibold text-slate-800">₹{(s.sale_price * s.quantity).toLocaleString('en-IN')}</td>
                           <td className="px-4 py-2.5 text-right text-xs text-slate-500">{new Date(s.sale_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
@@ -532,6 +585,18 @@ const Dashboard = () => {
           </div>
         </>
       )}
+
+      {/* Product List Modal */}
+      <ProductListModal
+        isOpen={productsModal.isOpen}
+        onClose={() => setProductsModal(prev => ({ ...prev, isOpen: false }))}
+        title={productsModal.title}
+        subtitle={productsModal.subtitle}
+        icon={productsModal.icon}
+        colorClass={productsModal.colorClass}
+        products={productsModal.products}
+        emptyMessage={productsModal.emptyMessage}
+      />
     </Layout>
   );
 };

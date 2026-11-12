@@ -116,11 +116,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     throw new Error('This number is registered as a Shopkeeper. Please login in the Shopkeeper portal.');
                 }
 
+                localStorage.setItem('user_role', 'dealer');
                 loginStatus.style.color = '#34d399';
                 loginStatus.textContent = 'Logged in successfully!';
                 
                 setTimeout(() => {
-                    window.location.href = '/';
+                    if (window.location.protocol === 'file:') {
+                        window.location.href = '../index.html';
+                    } else {
+                        window.location.href = '/';
+                    }
                 }, 500);
 
             } catch (error) {
@@ -252,6 +257,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         ]);
 
                     if (dbError) throw dbError;
+
+                    try {
+                        localStorage.setItem('inventoryx_just_registered', 'true');
+                    } catch (e) {}
 
                     signupStatus.style.color = '#34d399';
                     signupStatus.textContent = 'Account created successfully!';

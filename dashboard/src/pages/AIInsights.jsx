@@ -8,16 +8,20 @@ import {
   AlertTriangle, Lightbulb, Info, CheckCircle, ChevronRight, X, IndianRupee,
   Calendar, Sparkles
 } from 'lucide-react';
+import ProductListModal from '../components/ProductListModal';
 
 const StatCard = ({ title, value, icon: Icon, colorClass, onClick }) => (
   <div 
-    className={`card cursor-pointer hover:shadow-md transition-shadow border-l-4 ${colorClass.border}`}
+    className={`card cursor-pointer hover:shadow-md transition-all hover:scale-[1.02] active:scale-[0.99] border-l-4 ${colorClass.border} select-none`}
     onClick={onClick}
   >
     <div className="flex justify-between items-start mb-2">
       <div className={`p-2 rounded-lg ${colorClass.bg} ${colorClass.text}`}>
         <Icon size={20} />
       </div>
+      <span className="text-[10px] font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded-full border border-primary-200">
+        View ↗
+      </span>
     </div>
     <div>
       <p className="text-xs text-slate-500 font-medium mb-1 uppercase tracking-wider">{title}</p>
@@ -135,6 +139,17 @@ const AIInsights = () => {
   const [activeSection, setActiveSection] = useState('recommendations'); // 'recommendations', 'stockout', 'demand', 'fast', 'slow'
   const [selectedInsight, setSelectedInsight] = useState(null);
 
+  // Products Modal State
+  const [productsModal, setProductsModal] = useState({
+    isOpen: false,
+    title: '',
+    subtitle: '',
+    icon: Package,
+    colorClass: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-500' },
+    products: [],
+    emptyMessage: 'No products found.'
+  });
+
   const fetchInsights = async () => {
     setLoading(true);
     setError(null);
@@ -212,7 +227,7 @@ const AIInsights = () => {
 
   return (
     <Layout title="AI Business Insights">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+      <div data-tour="ai-insights" className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <BrainCircuit className="text-primary-600" /> 
@@ -285,42 +300,153 @@ const AIInsights = () => {
               value={insightsData.overview.festivalAlertsCount} 
               icon={Sparkles} 
               colorClass={{ bg: 'bg-purple-50', text: 'text-purple-600', border: 'border-l-purple-500' }}
-              onClick={() => setActiveSection('festival')}
+              onClick={() => {
+                setActiveSection('festival');
+                const festivalItems = (insightsData.festivalData?.forecasts || []).map(f => ({
+                  id: f.id || f.product?.id,
+                  name: f.product?.name || "Product",
+                  category: f.festival || "Festival Item",
+                  stock_quantity: f.currentStock,
+                  price: f.product?.base_price || 0,
+                  daysRemaining: f.daysUntil,
+                  daysUntil: f.daysUntil
+                }));
+                setProductsModal({
+                  isOpen: true,
+                  title: 'Festival Demand Forecast',
+                  subtitle: `${insightsData.overview.festivalAlertsCount} products with upcoming festive surges`,
+                  icon: Sparkles,
+                  colorClass: { bg: 'bg-purple-50', text: 'text-purple-600', border: 'border-purple-500' },
+                  products: festivalItems,
+                  emptyMessage: 'No upcoming festival spikes detected.'
+                });
+              }}
             />
             <StatCard 
               title="At Risk of Stockout" 
               value={insightsData.overview.productsAtRisk} 
               icon={AlertCircle} 
               colorClass={{ bg: 'bg-red-50', text: 'text-red-600', border: 'border-l-red-500' }}
-              onClick={() => setActiveSection('stockout')}
+              onClick={() => {
+                setActiveSection('stockout');
+                const riskItems = (insightsData.stockoutPredictions || []).map(p => ({
+                  id: p.id,
+                  name: p.name,
+                  category: p.category || "Stockout Risk",
+                  stock_quantity: p.currentStock,
+                  price: p.price || p.base_price || 0,
+                  daysRemaining: p.estimatedDaysRemaining
+                }));
+                setProductsModal({
+                  isOpen: true,
+                  title: 'Products at Risk of Stockout',
+                  subtitle: `${insightsData.overview.productsAtRisk} products projected to run out soon`,
+                  icon: AlertCircle,
+                  colorClass: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-500' },
+                  products: riskItems,
+                  emptyMessage: 'Zero products at risk of stockout!'
+                });
+              }}
             />
             <StatCard 
               title="Restock Recommended" 
               value={insightsData.overview.restockRecommended} 
               icon={Package} 
               colorClass={{ bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-l-amber-500' }}
-              onClick={() => setActiveSection('recommendations')}
+              onClick={() => {
+                setActiveSection('recommendations');
+                const restockItems = (insightsData.recommendations || []).map(r => ({
+                  id: r.id || r.product?.id,
+                  name: r.product?.name || r.name,
+                  category: r.product?.category || "Restock",
+                  stock_quantity: r.currentStock || r.product?.stock_quantity,
+                  price: r.product?.base_price || 0
+                }));
+                setProductsModal({
+                  isOpen: true,
+                  title: 'Restock Recommendations',
+                  subtitle: `${insightsData.overview.restockRecommended} products needing inventory replenishment`,
+                  icon: Package,
+                  colorClass: { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-500' },
+                  products: restockItems,
+                  emptyMessage: 'All products have optimal stock levels.'
+                });
+              }}
             />
             <StatCard 
               title="High Demand" 
               value={insightsData.overview.highDemandCount} 
               icon={TrendingUp} 
               colorClass={{ bg: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-l-indigo-500' }}
-              onClick={() => setActiveSection('demand')}
+              onClick={() => {
+                setActiveSection('demand');
+                const highDemandItems = (insightsData.demandAnalysis?.highDemand || []).map(p => ({
+                  id: p.id,
+                  name: p.name,
+                  category: p.category || "High Demand",
+                  stock_quantity: p.currentStock || p.stock_quantity,
+                  price: p.base_price || 0
+                }));
+                setProductsModal({
+                  isOpen: true,
+                  title: 'High Demand Products',
+                  subtitle: `${insightsData.overview.highDemandCount} products experiencing heavy sales velocity`,
+                  icon: TrendingUp,
+                  colorClass: { bg: 'bg-indigo-50', text: 'text-indigo-600', border: 'border-indigo-500' },
+                  products: highDemandItems,
+                  emptyMessage: 'No high demand spikes detected.'
+                });
+              }}
             />
             <StatCard 
               title="Fast Moving" 
               value={insightsData.overview.fastMovingCount} 
               icon={ShoppingCart} 
               colorClass={{ bg: 'bg-green-50', text: 'text-green-600', border: 'border-l-green-500' }}
-              onClick={() => setActiveSection('fast')}
+              onClick={() => {
+                setActiveSection('fast');
+                const fastItems = (insightsData.fastMoving || []).map(p => ({
+                  id: p.id,
+                  name: p.name,
+                  category: p.category || "Fast Moving",
+                  stock_quantity: p.currentStock || p.stock_quantity,
+                  price: p.base_price || 0
+                }));
+                setProductsModal({
+                  isOpen: true,
+                  title: 'Fast Moving Products',
+                  subtitle: `${insightsData.overview.fastMovingCount} best-selling inventory items`,
+                  icon: ShoppingCart,
+                  colorClass: { bg: 'bg-green-50', text: 'text-green-600', border: 'border-green-500' },
+                  products: fastItems,
+                  emptyMessage: 'No fast moving items currently.'
+                });
+              }}
             />
             <StatCard 
               title="Slow Moving" 
               value={insightsData.overview.slowMovingCount} 
               icon={Box} 
               colorClass={{ bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-l-slate-400' }}
-              onClick={() => setActiveSection('slow')}
+              onClick={() => {
+                setActiveSection('slow');
+                const slowItems = (insightsData.slowMoving || []).map(p => ({
+                  id: p.id,
+                  name: p.name,
+                  category: p.category || "Slow Moving",
+                  stock_quantity: p.currentStock || p.stock_quantity,
+                  price: p.base_price || 0
+                }));
+                setProductsModal({
+                  isOpen: true,
+                  title: 'Slow Moving Products',
+                  subtitle: `${insightsData.overview.slowMovingCount} products with sluggish turnover`,
+                  icon: Box,
+                  colorClass: { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-400' },
+                  products: slowItems,
+                  emptyMessage: 'Great news! No dead/slow moving inventory detected.'
+                });
+              }}
             />
           </div>
 
@@ -606,6 +732,18 @@ const AIInsights = () => {
       {/* Insight Detail Modal */}
       <Modal isOpen={!!selectedInsight} onClose={() => setSelectedInsight(null)} insight={selectedInsight} />
       
+      {/* Product List Modal for StatCards */}
+      <ProductListModal
+        isOpen={productsModal.isOpen}
+        onClose={() => setProductsModal(prev => ({ ...prev, isOpen: false }))}
+        title={productsModal.title}
+        subtitle={productsModal.subtitle}
+        icon={productsModal.icon}
+        colorClass={productsModal.colorClass}
+        products={productsModal.products}
+        emptyMessage={productsModal.emptyMessage}
+      />
+
     </Layout>
   );
 };

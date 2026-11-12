@@ -1,691 +1,898 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../services/supabase';
 import { 
-  ShoppingCart, Search, Plus, Eye, Trash2, X, ChevronRight,
-  Clock, CheckCircle, Package, Truck, AlertCircle, IndianRupee, MapPin
+  ShoppingCart, Search, Eye, X,
+  Clock, CheckCircle2, Truck, AlertCircle, 
+  IndianRupee, MapPin, Phone, Bell,
+  RefreshCw, ChefHat, Store, Receipt, Zap
 } from 'lucide-react';
 
-const StatCard = ({ title, value, icon: Icon, colorClass, isLoading }) => {
-  if (isLoading) {
-    return (
-      <div className="card animate-pulse">
-        <div className="flex justify-between items-start mb-4">
-          <div className="w-12 h-12 bg-slate-200 rounded-lg"></div>
-        </div>
-        <div>
-          <div className="w-24 h-4 bg-slate-200 rounded mb-2"></div>
-          <div className="w-16 h-8 bg-slate-200 rounded"></div>
-        </div>
-      </div>
-    );
-  }
+// ============================================================================
+// AUDIO NOTIFICATION UTILITY (Web Audio API - 100% Reliable, No External File)
+// ============================================================================
+const playOrderChime = () => {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
 
-  return (
-    <div className="card">
-      <div className="flex justify-between items-start mb-4">
-        <div className={`p-3 rounded-lg ${colorClass}`}>
-          <Icon size={24} />
-        </div>
-      </div>
-      <div>
-        <p className="text-sm text-slate-500 font-medium mb-1">{title}</p>
-        <h3 className="text-2xl font-bold text-slate-900">{value}</h3>
-      </div>
-    </div>
-  );
+    // 3-tone cheerful order chime: E5 -> G#5 -> B5
+    const notes = [
+      { freq: 659.25, start: 0, duration: 0.15 },
+      { freq: 830.61, start: 0.12, duration: 0.15 },
+      { freq: 987.77, start: 0.24, duration: 0.35 }
+    ];
+
+    notes.forEach(({ freq, start, duration }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+
+      gain.gain.setValueAtTime(0, ctx.currentTime + start);
+      gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration);
+    });
+  } catch (err) {
+    console.warn("Audio notification chime error:", err);
+  }
 };
 
-const Modal = ({ isOpen, onClose, title, children }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto overflow-x-hidden bg-slate-900/50 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-4xl max-h-full my-8">
-        <div className="relative bg-white rounded-xl shadow-xl max-h-[90vh] flex flex-col">
-          <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 shrink-0">
-            <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
-            <button 
-              onClick={onClose}
-              className="text-slate-400 hover:bg-slate-100 hover:text-slate-900 rounded-lg text-sm w-8 h-8 flex justify-center items-center transition-colors"
-            >
-              <X size={18} />
-            </button>
-          </div>
-          <div className="p-4 md:p-5 overflow-y-auto flex-1">
-            {children}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+// ============================================================================
+// STATUS CONFIGURATION
+// ============================================================================
+const STATUS_CONFIG = {
+  'Confirmed': {
+    label: 'Confirmed',
+    badge: 'bg-blue-50 text-blue-700 border-blue-200',
+    icon: CheckCircle2,
+    next: 'Preparing',
+    nextLabel: 'Start Preparing',
+    nextIcon: ChefHat,
+    nextBtn: 'bg-amber-600 hover:bg-amber-700 text-white'
+  },
+  'Preparing': {
+    label: 'Preparing',
+    badge: 'bg-amber-50 text-amber-700 border-amber-200',
+    icon: ChefHat,
+    next: 'Out for Delivery',
+    nextLabel: 'Dispatch for Delivery',
+    nextIcon: Truck,
+    nextBtn: 'bg-indigo-600 hover:bg-indigo-700 text-white'
+  },
+  'Out for Delivery': {
+    label: 'Out for Delivery',
+    badge: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    icon: Truck,
+    next: 'Delivered',
+    nextLabel: 'Mark as Delivered',
+    nextIcon: CheckCircle2,
+    nextBtn: 'bg-emerald-600 hover:bg-emerald-700 text-white'
+  },
+  'Delivered': {
+    label: 'Delivered',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    icon: CheckCircle2,
+    next: null,
+    nextLabel: null,
+    nextIcon: null,
+    nextBtn: ''
+  },
+  'Cancelled': {
+    label: 'Cancelled',
+    badge: 'bg-rose-50 text-rose-700 border-rose-200',
+    icon: AlertCircle,
+    next: null,
+    nextLabel: null,
+    nextIcon: null,
+    nextBtn: ''
+  }
 };
 
 const Orders = () => {
+  // State
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [dealerId, setDealerId] = useState(null);
-  
   const [orders, setOrders] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [activeShopName, setActiveShopName] = useState(() => localStorage.getItem('user_shop_name') || 'vivek');
   
-  // UI State
-  const [activeModal, setActiveModal] = useState(null); // 'create', 'view'
+  // Audio & Toast Notification
+  const [incomingToast, setIncomingToast] = useState(null);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+  
+  // UI & Filters
   const [selectedOrder, setSelectedOrder] = useState(null);
-  
-  // Filters
-  const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  
-  // Create Order Form State
-  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', email: '', address: '' });
-  const [orderItems, setOrderItems] = useState([]);
-  const [discount, setDiscount] = useState(0);
-  const [formSubmitting, setFormSubmitting] = useState(false);
-  const [formError, setFormError] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [updatingOrderId, setUpdatingOrderId] = useState(null);
 
-  const fetchData = async () => {
+  const activeShopNameRef = useRef(activeShopName);
+  useEffect(() => {
+    activeShopNameRef.current = activeShopName;
+  }, [activeShopName]);
+
+  // ============================================================================
+  // 1. INITIALIZE DATA & SHOP PROFILE
+  // ============================================================================
+  const fetchInitialData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data: { session }, error: authError } = await supabase.auth.getSession();
-      if (authError || !session?.user) throw new Error("Authentication required.");
-
-      const { data: dealerData, error: dealerError } = await supabase
-        .from('dealers')
-        .select('id')
-        .eq('user_id', session.user.id)
-        .single();
-        
-      if (dealerError || !dealerData) throw new Error("Dealer profile not found.");
-      const dId = dealerData.id;
-      setDealerId(dId);
-
-      // Fetch Products with Stock
-      const { data: prodData, error: prodError } = await supabase
-        .from('products')
-        .select(`id, name, sku, base_price, inventory (stock_quantity)`)
-        .eq('dealer_id', dId)
-        .eq('is_deleted', false);
+      // 1. Check User Session
+      const { data: { session } } = await supabase.auth.getSession();
       
-      if (prodError) throw prodError;
-      
-      setProducts((prodData || []).map(p => ({
-        ...p,
-        stock_quantity: p.inventory?.[0]?.stock_quantity || 0
-      })));
+      let shopName = '';
+      if (session?.user) {
+        const { data: dealerData } = await supabase
+          .from('dealers')
+          .select('id, full_name, shop_name, role')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
 
-      // Fetch Orders with Items
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items (
-            id, product_id, quantity, unit_price, total_price,
-            products (name, sku)
-          )
-        `)
-        .eq('dealer_id', dId)
-        .order('created_at', { ascending: false });
-        
-      if (ordersError) throw ordersError;
-      setOrders(ordersData || []);
+        if (dealerData?.shop_name) {
+          shopName = dealerData.shop_name;
+        }
+      }
+
+      if (!shopName) {
+        shopName = localStorage.getItem('user_shop_name') || 'vivek';
+      }
+
+      setActiveShopName(shopName);
+      activeShopNameRef.current = shopName;
+
+      // 2. Fetch orders strictly for this shop
+      await loadOrders(shopName);
 
     } catch (err) {
-      console.error("Orders fetch error:", err);
-      if (err.message?.includes('relation "public.orders" does not exist')) {
-        setError("Database schema missing. Please run update-orders-schema.sql");
-      } else {
-        setError(err.message || "Failed to load orders");
-      }
+      console.error("Orders init error:", err);
+      setError(err.message || "Failed to load orders");
     } finally {
       setLoading(false);
     }
   };
 
+  // ============================================================================
+  // 2. LOAD ORDERS FROM SUPABASE (Strictly for this shopkeeper's shop)
+  // ============================================================================
+  const loadOrders = async (shopToFilter) => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select(`
+          id, order_number, shop_name, total_amount, status, payment_method, 
+          delivery_address, customer_phone, customer_name, created_at,
+          order_items (id, product_name, quantity, price, shop_name)
+        `)
+        .eq('shop_name', shopToFilter)
+        .order('created_at', { ascending: false });
+
+      let { data, error: ordersErr } = await query;
+      
+      // If columns like order_items.product_name or delivery_address don't exist yet in Supabase
+      if (ordersErr && (ordersErr.code === '42703' || ordersErr.message?.includes('does not exist'))) {
+        console.warn("Detected pending SQL schema update. Trying basic query...", ordersErr.message);
+        
+        let basicQuery = supabase
+          .from('orders')
+          .select('*')
+          .eq('shop_name', shopToFilter)
+          .order('created_at', { ascending: false });
+
+        const basicRes = await basicQuery;
+        if (!basicRes.error) {
+          setOrders(basicRes.data || []);
+          return;
+        }
+      }
+
+      if (ordersErr) {
+        throw ordersErr;
+      }
+
+      setError(null);
+      setOrders(data || []);
+    } catch (err) {
+      console.error("Error loading orders:", err);
+      setError(err.message || "Could not fetch orders");
+    }
+  };
+
   useEffect(() => {
-    fetchData();
+    fetchInitialData();
   }, []);
 
-  // Stats
-  const stats = useMemo(() => {
-    let total = orders.length;
-    let pending = 0, processing = 0, completed = 0, cancelled = 0;
-    let totalValue = 0;
-    
-    orders.forEach(o => {
-      if (o.status === 'Pending') pending++;
-      else if (o.status === 'Confirmed' || o.status === 'Processing') processing++;
-      else if (o.status === 'Completed') completed++;
-      else if (o.status === 'Cancelled') cancelled++;
-      
-      if (o.status !== 'Cancelled') totalValue += parseFloat(o.total_amount);
-    });
+  // ============================================================================
+  // 3. SUPABASE REALTIME SUBSCRIPTION FOR CUSTOMER ANDROID APP ORDERS
+  // ============================================================================
+  useEffect(() => {
+    console.log("Subscribing to realtime customer orders...");
 
-    return { total, pending, processing, completed, cancelled, totalValue };
+    const channel = supabase
+      .channel('realtime_orders_channel')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'orders' },
+        async (payload) => {
+          console.log("🔔 Realtime Order Received:", payload.new);
+          const newOrder = payload.new;
+          const currentShop = activeShopNameRef.current;
+
+          // Strictly filter by this shopkeeper's shop
+          const matchesShop = newOrder.shop_name && 
+            newOrder.shop_name.trim().toLowerCase() === currentShop?.trim().toLowerCase();
+
+          if (matchesShop) {
+            // Fetch associated order_items
+            const { data: items } = await supabase
+              .from('order_items')
+              .select('*')
+              .eq('order_id', newOrder.id);
+
+            const completeOrder = {
+              ...newOrder,
+              order_items: items || []
+            };
+
+            // Play audio notification chime
+            playOrderChime();
+
+            // Show Toast Alert Banner
+            setIncomingToast({
+              id: Date.now(),
+              orderNumber: newOrder.order_number || newOrder.id.substring(0, 8),
+              shopName: newOrder.shop_name,
+              totalAmount: newOrder.total_amount,
+              phone: newOrder.customer_phone || 'Customer',
+              address: newOrder.delivery_address || 'Online Order',
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            });
+
+            // Prepend new order to list
+            setOrders(prev => [completeOrder, ...prev.filter(o => o.id !== newOrder.id)]);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log("🔄 Realtime Order Update:", payload.new);
+          const updated = payload.new;
+          setOrders(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
+          setSelectedOrder(prev => prev && prev.id === updated.id ? { ...prev, ...updated } : prev);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setRealtimeConnected(true);
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          setRealtimeConnected(false);
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Auto-dismiss toast after 8 seconds
+  useEffect(() => {
+    if (incomingToast) {
+      const timer = setTimeout(() => {
+        setIncomingToast(null);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [incomingToast]);
+
+  // ============================================================================
+  // 4. UPDATE ORDER STATUS (Confirmed -> Preparing -> Out for Delivery -> Delivered)
+  // ============================================================================
+  const handleUpdateStatus = async (orderId, newStatus) => {
+    setUpdatingOrderId(orderId);
+    try {
+      const { error: updateErr } = await supabase
+        .from('orders')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', orderId);
+
+      if (updateErr) throw updateErr;
+
+      // Update state locally
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+      if (selectedOrder?.id === orderId) {
+        setSelectedOrder(prev => ({ ...prev, status: newStatus }));
+      }
+    } catch (err) {
+      console.error("Failed to update status:", err);
+      alert("Failed to update status: " + err.message);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+
+
+  // ============================================================================
+  // 6. FILTERING & COMPUTED STATS
+  // ============================================================================
+  const filteredOrders = useMemo(() => {
+    return orders.filter(order => {
+      // Status filter
+      if (statusFilter !== 'All' && order.status !== statusFilter) {
+        return false;
+      }
+      // Search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const matchesNum = order.order_number?.toLowerCase().includes(query) || order.id?.toLowerCase().includes(query);
+        const matchesPhone = order.customer_phone?.toLowerCase().includes(query);
+        const matchesAddress = order.delivery_address?.toLowerCase().includes(query);
+        const matchesItems = order.order_items?.some(it => it.product_name?.toLowerCase().includes(query));
+        return matchesNum || matchesPhone || matchesAddress || matchesItems;
+      }
+      return true;
+    });
+  }, [orders, statusFilter, searchQuery]);
+
+  const stats = useMemo(() => {
+    const totalCount = orders.length;
+    const pendingCount = orders.filter(o => o.status === 'Confirmed' || o.status === 'Preparing').length;
+    const outForDeliveryCount = orders.filter(o => o.status === 'Out for Delivery').length;
+    const deliveredCount = orders.filter(o => o.status === 'Delivered').length;
+    const totalRevenue = orders
+      .filter(o => o.status !== 'Cancelled')
+      .reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+
+    return { totalCount, pendingCount, outForDeliveryCount, deliveredCount, totalRevenue };
   }, [orders]);
 
-  // Filtering
-  const filteredOrders = useMemo(() => {
-    return orders.filter(o => {
-      const matchesSearch = 
-        o.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        o.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        o.customer_phone?.includes(searchQuery) ||
-        o.order_items?.some(i => i.products?.name?.toLowerCase().includes(searchQuery.toLowerCase()));
-        
-      const matchesStatus = statusFilter === 'All' || o.status === statusFilter || 
-                            (statusFilter === 'Processing' && o.status === 'Confirmed');
-                            
-      return matchesSearch && matchesStatus;
-    });
-  }, [orders, searchQuery, statusFilter]);
-
-  // Form Calculations
-  const calculateTotals = () => {
-    const subtotal = orderItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-    const finalTotal = subtotal - parseFloat(discount || 0);
-    return { subtotal, finalTotal: finalTotal > 0 ? finalTotal : 0 };
-  };
-
-  const handleAddProductRow = () => {
-    setOrderItems([...orderItems, { product_id: '', quantity: 1, unit_price: 0 }]);
-  };
-
-  const handleUpdateRow = (index, field, value) => {
-    const newItems = [...orderItems];
-    newItems[index][field] = value;
-    
-    // Auto-fill price if product selected
-    if (field === 'product_id') {
-      const prod = products.find(p => p.id === value);
-      if (prod) newItems[index].unit_price = parseFloat(prod.base_price || 0);
-    }
-    
-    setOrderItems(newItems);
-  };
-
-  const handleRemoveRow = (index) => {
-    setOrderItems(orderItems.filter((_, i) => i !== index));
-  };
-
-  const handleCreateOrder = async (e) => {
-    e.preventDefault();
-    setFormSubmitting(true);
-    setFormError(null);
-    try {
-      if (!customerInfo.name.trim()) throw new Error("Customer name is required.");
-      if (orderItems.length === 0) throw new Error("Please add at least one product.");
-      
-      const cleanItems = [];
-      for (let i = 0; i < orderItems.length; i++) {
-        const item = orderItems[i];
-        if (!item.product_id) throw new Error(`Row ${i+1}: Please select a product.`);
-        
-        const qty = parseInt(item.quantity);
-        if (isNaN(qty) || qty <= 0) throw new Error(`Row ${i+1}: Quantity must be greater than 0.`);
-        
-        const prod = products.find(p => p.id === item.product_id);
-        if (qty > prod.stock_quantity) throw new Error(`Row ${i+1}: Exceeds available stock (${prod.stock_quantity}).`);
-        
-        cleanItems.push({
-          product_id: item.product_id,
-          quantity: qty,
-          unit_price: parseFloat(item.unit_price),
-          total_price: qty * parseFloat(item.unit_price)
-        });
-      }
-
-      const { subtotal, finalTotal } = calculateTotals();
-
-      // 1. Insert Order
-      const { data: newOrder, error: orderErr } = await supabase
-        .from('orders')
-        .insert([{
-          dealer_id: dealerId,
-          customer_name: customerInfo.name,
-          customer_phone: customerInfo.phone,
-          customer_email: customerInfo.email,
-          customer_address: customerInfo.address,
-          status: 'Pending',
-          subtotal: subtotal,
-          discount: parseFloat(discount || 0),
-          total_amount: finalTotal
-        }])
-        .select()
-        .single();
-        
-      if (orderErr) throw orderErr;
-
-      // 2. Insert Order Items
-      const itemsToInsert = cleanItems.map(item => ({
-        order_id: newOrder.id,
-        ...item
-      }));
-
-      const { error: itemsErr } = await supabase
-        .from('order_items')
-        .insert(itemsToInsert);
-
-      if (itemsErr) {
-        // Rollback order if items fail
-        await supabase.from('orders').delete().eq('id', newOrder.id);
-        throw itemsErr;
-      }
-
-      await fetchData();
-      closeModal();
-    } catch (err) {
-      setFormError(err.message);
-    } finally {
-      setFormSubmitting(false);
-    }
-  };
-
-  const handleUpdateStatus = async (newStatus) => {
-    if (!selectedOrder) return;
-    setFormSubmitting(true);
-    setFormError(null);
-    try {
-      if (newStatus === 'Completed' && selectedOrder.status !== 'Completed') {
-        // Atomic Operation: Complete Order, deduct stock, create sales
-        const { data, error } = await supabase.rpc('complete_order', {
-          p_order_id: selectedOrder.id
-        });
-        
-        if (error) throw error;
-      } else {
-        // Simple status update for other statuses
-        const { error } = await supabase
-          .from('orders')
-          .update({ status: newStatus, updated_at: new Date().toISOString() })
-          .eq('id', selectedOrder.id);
-          
-        if (error) throw error;
-      }
-      
-      await fetchData();
-      closeModal();
-    } catch (err) {
-      setFormError(err.message || 'Failed to update order status');
-    } finally {
-      setFormSubmitting(false);
-    }
-  };
-
-  const openAddModal = () => {
-    setCustomerInfo({ name: '', phone: '', email: '', address: '' });
-    setOrderItems([{ product_id: '', quantity: 1, unit_price: 0 }]);
-    setDiscount(0);
-    setFormError(null);
-    setActiveModal('create');
-  };
-
-  const closeModal = () => {
-    if (formSubmitting) return;
-    setActiveModal(null);
-    setSelectedOrder(null);
-  };
-
-  const getStatusBadge = (status) => {
-    switch(status) {
-      case 'Pending': return <span className="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold border border-amber-200">Pending</span>;
-      case 'Confirmed': return <span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold border border-blue-200">Confirmed</span>;
-      case 'Processing': return <span className="px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold border border-indigo-200">Processing</span>;
-      case 'Completed': return <span className="px-2.5 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold border border-green-200">Completed</span>;
-      case 'Cancelled': return <span className="px-2.5 py-1 bg-red-100 text-red-700 rounded-full text-xs font-semibold border border-red-200">Cancelled</span>;
-      default: return null;
-    }
-  };
-
-  if (error) {
-    return (
-      <Layout title="Orders Management">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center mb-8">
-          <AlertCircle className="text-red-500 mx-auto mb-3" size={40} />
-          <h3 className="text-lg font-semibold text-red-800 mb-2">Error Loading Orders</h3>
-          <p className="text-red-600">{error}</p>
-        </div>
-      </Layout>
-    );
-  }
-
   return (
-    <Layout title="Orders Management">
-      {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
-        <StatCard title="Total Orders" value={stats.total} icon={ShoppingCart} colorClass="bg-blue-50 text-blue-600" isLoading={loading} />
-        <StatCard title="Pending" value={stats.pending} icon={Clock} colorClass="bg-amber-50 text-amber-600" isLoading={loading} />
-        <StatCard title="Processing" value={stats.processing} icon={Truck} colorClass="bg-indigo-50 text-indigo-600" isLoading={loading} />
-        <StatCard title="Completed" value={stats.completed} icon={CheckCircle} colorClass="bg-green-50 text-green-600" isLoading={loading} />
-        <StatCard title="Cancelled" value={stats.cancelled} icon={X} colorClass="bg-red-50 text-red-600" isLoading={loading} />
-        <StatCard title="Total Value" value={`₹${stats.totalValue.toLocaleString('en-IN')}`} icon={IndianRupee} colorClass="bg-slate-100 text-slate-700" isLoading={loading} />
-      </div>
-
-      <div className="card !p-0 overflow-hidden flex flex-col h-[calc(100vh-280px)] min-h-[500px]">
-        {/* Header & Controls */}
-        <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 bg-white">
-          <div className="flex items-center gap-4 flex-1">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text" 
-                placeholder="Search orders, customers..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <select 
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-500 hidden md:block"
-            >
-              <option value="All">All Status</option>
-              <option value="Pending">Pending</option>
-              <option value="Processing">Processing</option>
-              <option value="Completed">Completed</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
+    <Layout title="Customer App Orders (Real-Time)">
+      
+      {/* ====================================================================== */}
+      {/* INCOMING ORDER TOAST NOTIFICATION (Visual Alert) */}
+      {/* ====================================================================== */}
+      {incomingToast && (
+        <div className="fixed top-6 right-6 z-50 max-w-md w-full bg-slate-900 border-2 border-emerald-500 text-white p-4 rounded-2xl shadow-2xl animate-bounce-subtle flex items-start gap-4">
+          <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-xl flex items-center justify-center shrink-0">
+            <Bell size={24} className="animate-pulse" />
           </div>
-          <button onClick={openAddModal} className="btn btn-primary flex items-center gap-2">
-            <Plus size={18} /> Create Order
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                ⚡ New Order Received!
+              </span>
+              <span className="text-[11px] text-slate-400">{incomingToast.time}</span>
+            </div>
+            <h4 className="text-base font-bold truncate">
+              Order #{incomingToast.orderNumber}
+            </h4>
+            <p className="text-xs text-slate-300 mt-0.5 truncate">
+              📞 {incomingToast.phone} • ₹{Number(incomingToast.totalAmount).toLocaleString('en-IN')}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1 truncate">
+              📍 {incomingToast.address}
+            </p>
+          </div>
+          <button 
+            onClick={() => setIncomingToast(null)} 
+            className="text-slate-400 hover:text-white p-1 rounded-lg"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
+      {/* ====================================================================== */}
+      {/* HEADER: SHOPKEEPER STORE INFO & REFRESH */}
+      {/* ====================================================================== */}
+      <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+        
+        {/* Shop Info Display (No Dropdown, Strictly This Shopkeeper's Shop) */}
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-primary-50 text-primary-600 rounded-lg">
+            <Store size={22} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Shopkeeper Store:
+              </span>
+              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold ${
+                realtimeConnected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${
+                  realtimeConnected ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'
+                }`} />
+                {realtimeConnected ? 'Live Realtime Connected' : 'Connecting...'}
+              </span>
+            </div>
+            <h3 className="font-bold text-slate-900 text-lg flex items-center gap-2 mt-0.5">
+              🏪 {activeShopName || 'My Store'}
+            </h3>
+          </div>
+        </div>
+
+        {/* Header Actions */}
+        <div className="flex items-center gap-2">
+          <a
+            href="/billing?tab=online-orders"
+            className="px-3.5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold shadow-sm"
+            title="Auto-Bill Orders in POS"
+          >
+            <Receipt size={15} />
+            <span>Billing POS Stream</span>
+          </a>
+
+          <button
+            onClick={() => loadOrders(activeShopName)}
+            disabled={loading}
+            className="px-3.5 py-2 text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors flex items-center gap-2 text-xs font-semibold shadow-sm"
+            title="Refresh Orders"
+          >
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+            <span>Refresh Orders</span>
           </button>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto flex-1">
-          {loading ? (
-            <div className="p-12 flex justify-center"><div className="spinner"></div></div>
-          ) : filteredOrders.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full p-12 text-center">
-              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 mb-4">
-                <ShoppingCart size={32} />
-              </div>
-              <h3 className="text-lg font-bold text-slate-700 mb-1">No orders found</h3>
-              <p className="text-slate-500 max-w-sm mx-auto mb-6">Create an order to manage fulfillment and shipments.</p>
-              {!searchQuery && <button onClick={openAddModal} className="btn btn-primary">Create Your First Order</button>}
-            </div>
-          ) : (
-            <table className="w-full text-sm text-left text-slate-600">
-              <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0 z-10">
-                <tr>
-                  <th className="px-6 py-4 font-medium">Order ID & Date</th>
-                  <th className="px-6 py-4 font-medium">Customer</th>
-                  <th className="px-6 py-4 font-medium text-center">Items</th>
-                  <th className="px-6 py-4 font-medium text-right">Total Amount</th>
-                  <th className="px-6 py-4 font-medium text-center">Status</th>
-                  <th className="px-6 py-4 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredOrders.map((order) => {
-                  const totalQty = order.order_items?.reduce((sum, i) => sum + i.quantity, 0) || 0;
-                  return (
-                    <tr key={order.id} className={`hover:bg-slate-50/50 transition-colors group ${order.status==='Cancelled'?'bg-red-50/30':''}`}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="font-mono font-medium text-slate-900">#{order.id.split('-')[0].toUpperCase()}</div>
-                        <div className="text-xs text-slate-500 mt-1">{new Date(order.created_at).toLocaleDateString('en-GB')}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900">{order.customer_name}</div>
-                        {order.customer_phone && <div className="text-xs text-slate-500">{order.customer_phone}</div>}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <div className="font-medium text-slate-900">{order.order_items?.length || 0} prod.</div>
-                        <div className="text-xs text-slate-500">{totalQty} qty</div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <span className="font-bold text-slate-900 text-base">₹{parseFloat(order.total_amount).toLocaleString('en-IN')}</span>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        {getStatusBadge(order.status)}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button onClick={() => { setSelectedOrder(order); setActiveModal('view'); }} className="btn bg-white border border-slate-200 text-slate-700 text-xs px-3 py-1.5 hover:bg-slate-50 opacity-0 group-hover:opacity-100 transition-opacity">
-                          Manage
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
+      </div>
+
+      {/* ====================================================================== */}
+      {/* STATS OVERVIEW CARDS */}
+      {/* ====================================================================== */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">Total Orders</span>
+            <ShoppingCart size={18} className="text-primary-500" />
+          </div>
+          <h3 className="text-2xl font-bold text-slate-900">{stats.totalCount}</h3>
+          <p className="text-xs text-slate-400 mt-1">Live customer orders</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">Kitchen / Preparing</span>
+            <ChefHat size={18} className="text-amber-500" />
+          </div>
+          <h3 className="text-2xl font-bold text-amber-600">{stats.pendingCount}</h3>
+          <p className="text-xs text-slate-400 mt-1">Needs attention</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">Out for Delivery</span>
+            <Truck size={18} className="text-indigo-500" />
+          </div>
+          <h3 className="text-2xl font-bold text-indigo-600">{stats.outForDeliveryCount}</h3>
+          <p className="text-xs text-slate-400 mt-1">On the way</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between text-slate-500 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">Total Value</span>
+            <IndianRupee size={18} className="text-emerald-500" />
+          </div>
+          <h3 className="text-2xl font-bold text-emerald-600">₹{stats.totalRevenue.toLocaleString('en-IN')}</h3>
+          <p className="text-xs text-slate-400 mt-1">{stats.deliveredCount} delivered orders</p>
         </div>
       </div>
 
-      {/* --- MODALS --- */}
+      {/* ====================================================================== */}
+      {/* SEARCH AND STATUS FILTERS */}
+      {/* ====================================================================== */}
+      <div data-tour="orders" className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        
+        {/* Status Filter Tabs */}
+        <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
+          {['All', 'Confirmed', 'Preparing', 'Out for Delivery', 'Delivered', 'Cancelled'].map((status) => {
+            const count = status === 'All' 
+              ? orders.length 
+              : orders.filter(o => o.status === status).length;
+            const isActive = statusFilter === status;
 
-      {/* Create Order Modal */}
-      <Modal isOpen={activeModal === 'create'} onClose={closeModal} title="Create New Order">
-        <form onSubmit={handleCreateOrder} className="space-y-6">
-          {formError && (
-            <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg flex items-start gap-2">
-              <AlertCircle size={16} className="shrink-0 mt-0.5" />
-              <span>{formError}</span>
-            </div>
-          )}
+            return (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                  isActive 
+                    ? 'bg-slate-900 text-white' 
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {status}
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                  isActive ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
-          {/* Customer Info Section */}
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-            <h4 className="text-sm font-bold text-slate-800 mb-3 uppercase tracking-wider">Customer Information</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Full Name *</label>
-                <input required type="text" value={customerInfo.name} onChange={e => setCustomerInfo({...customerInfo, name: e.target.value})} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Phone Number</label>
-                <input type="tel" value={customerInfo.phone} onChange={e => setCustomerInfo({...customerInfo, phone: e.target.value})} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary-500" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-medium text-slate-700 mb-1">Delivery Address</label>
-                <textarea rows="2" value={customerInfo.address} onChange={e => setCustomerInfo({...customerInfo, address: e.target.value})} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary-500"></textarea>
+        {/* Search Input */}
+        <div className="relative w-full md:w-72">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search order #, phone, item..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+        </div>
+
+      </div>
+
+      {/* ====================================================================== */}
+      {/* ORDERS LIST / TABLE */}
+      {/* ====================================================================== */}
+      {loading ? (
+        <div className="card text-center py-16">
+          <RefreshCw className="animate-spin text-primary-500 mx-auto mb-3" size={32} />
+          <p className="text-slate-600 font-medium">Connecting to Supabase Realtime...</p>
+        </div>
+      ) : error ? (
+        <div className="card bg-red-50 border-red-200 text-red-800 p-6 rounded-xl">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={24} className="text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="font-bold text-red-900">Database Setup Required</h4>
+              <p className="text-sm mt-1">{error}</p>
+              <div className="mt-4 p-3 bg-white rounded-lg border border-red-200 text-xs font-mono text-slate-700">
+                Execute the script <strong>update-customer-orders-schema.sql</strong> in your Supabase SQL editor.
               </div>
             </div>
           </div>
+        </div>
+      ) : filteredOrders.length === 0 ? (
+        <div className="card text-center py-16 bg-white border border-dashed border-slate-300 rounded-2xl">
+          <ShoppingCart size={48} className="text-slate-300 mx-auto mb-3" />
+          <h3 className="text-lg font-bold text-slate-800">No Orders Found</h3>
+          <p className="text-sm text-slate-500 max-w-sm mx-auto mt-1">
+            {searchQuery 
+              ? "No orders matched your search criteria." 
+              : `Waiting for customer orders for "${activeShopName}". Incoming orders from the customer app will appear here live.`}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredOrders.map((order) => {
+            const config = STATUS_CONFIG[order.status] || STATUS_CONFIG['Confirmed'];
+            const StatusIcon = config.icon;
+            const items = order.order_items || [];
+            const itemCount = items.reduce((sum, it) => sum + (it.quantity || 1), 0);
 
-          {/* Order Items Section */}
-          <div>
-            <div className="flex justify-between items-end mb-3">
-              <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Order Items</h4>
-            </div>
-            
-            <div className="space-y-3">
-              {orderItems.map((item, index) => (
-                <div key={index} className="flex flex-col md:flex-row gap-3 items-end bg-white p-3 border border-slate-200 rounded-lg">
-                  <div className="flex-1 w-full">
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Product</label>
-                    <select required value={item.product_id} onChange={e => handleUpdateRow(index, 'product_id', e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary-500">
-                      <option value="">-- Select Product --</option>
-                      {products.map(p => (
-                        <option key={p.id} value={p.id} disabled={p.stock_quantity === 0}>
-                          {p.name} (Available: {p.stock_quantity})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="w-full md:w-24">
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Quantity</label>
-                    <input required type="number" min="1" value={item.quantity} onChange={e => handleUpdateRow(index, 'quantity', e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary-500 text-center" />
-                  </div>
-                  <div className="w-full md:w-32">
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Unit Price (₹)</label>
-                    <input required type="number" min="0" step="0.01" value={item.unit_price} onChange={e => handleUpdateRow(index, 'unit_price', e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary-500 text-right" />
-                  </div>
-                  <div className="w-full md:w-32 hidden md:block">
-                    <label className="block text-xs font-medium text-slate-500 mb-1 text-right">Total (₹)</label>
-                    <div className="px-3 py-2 bg-slate-100 border border-slate-100 rounded-lg text-sm font-semibold text-right text-slate-700">
-                      {((parseInt(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)).toLocaleString('en-IN')}
+            return (
+              <div 
+                key={order.id}
+                className="bg-white rounded-xl border border-slate-200 hover:border-slate-300 shadow-sm p-4 transition-all duration-200 hover:shadow-md"
+              >
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  
+                  {/* Left: Order Info & Customer Details */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 flex-wrap mb-1.5">
+                      <span className="font-mono font-bold text-slate-900 text-base">
+                        #{order.order_number || order.id.substring(0, 8)}
+                      </span>
+                      
+                      {/* Shop Name Tag */}
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded">
+                        <Store size={12} /> {order.shop_name}
+                      </span>
+
+                      {/* Status Badge */}
+                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${config.badge}`}>
+                        <StatusIcon size={12} />
+                        {order.status}
+                      </span>
+
+                      {/* Payment Method */}
+                      <span className="text-[11px] font-medium text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded">
+                        {order.payment_method || 'Cash on Delivery'}
+                      </span>
+
+                      {/* Time */}
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
+                        <Clock size={12} />
+                        {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {new Date(order.created_at).toLocaleDateString()}
+                      </span>
                     </div>
-                  </div>
-                  {orderItems.length > 1 && (
-                    <button type="button" onClick={() => handleRemoveRow(index)} className="p-2 text-slate-400 hover:text-red-500 transition-colors bg-slate-50 rounded-lg border border-slate-200">
-                      <Trash2 size={18} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            
-            <button type="button" onClick={handleAddProductRow} className="mt-3 text-sm font-semibold text-primary-600 hover:text-primary-700 flex items-center gap-1">
-              <Plus size={16} /> Add Another Product
-            </button>
-          </div>
 
-          {/* Summary Section */}
-          <div className="flex justify-end pt-4 border-t border-slate-100">
-            <div className="w-full md:w-64 space-y-2">
-              <div className="flex justify-between text-sm text-slate-600">
-                <span>Subtotal</span>
-                <span className="font-medium">₹{calculateTotals().subtotal.toLocaleString('en-IN')}</span>
-              </div>
-              <div className="flex justify-between text-sm text-slate-600 items-center">
-                <span>Discount (₹)</span>
-                <input type="number" min="0" value={discount} onChange={e => setDiscount(e.target.value)} className="w-24 px-2 py-1 bg-slate-50 border border-slate-200 rounded-md text-right focus:outline-none" />
-              </div>
-              <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                <span className="font-bold text-slate-800">Final Total</span>
-                <span className="text-xl font-bold text-primary-600">₹{calculateTotals().finalTotal.toLocaleString('en-IN')}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4 flex justify-end gap-3 border-t border-slate-100">
-            <button type="button" onClick={closeModal} className="btn bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={formSubmitting} className="btn btn-primary min-w-[120px]">
-              {formSubmitting ? <span className="spinner"></span> : 'Create Order'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* View & Manage Order Modal */}
-      <Modal isOpen={activeModal === 'view'} onClose={closeModal} title={`Order #${selectedOrder?.id.split('-')[0].toUpperCase()}`}>
-        {selectedOrder && (
-          <div className="space-y-6">
-            {formError && (
-              <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg flex items-start gap-2">
-                <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                <span>{formError}</span>
-              </div>
-            )}
-
-            {/* Workflow Control */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Current Status</p>
-                {getStatusBadge(selectedOrder.status)}
-                {selectedOrder.status === 'Completed' && <p className="text-xs text-green-600 mt-2 font-medium">✓ Inventory updated & sales recorded.</p>}
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {selectedOrder.status === 'Pending' && (
-                  <>
-                    <button onClick={() => handleUpdateStatus('Confirmed')} disabled={formSubmitting} className="btn bg-blue-600 hover:bg-blue-700 text-white border-none text-sm px-4">Mark Confirmed</button>
-                    <button onClick={() => handleUpdateStatus('Cancelled')} disabled={formSubmitting} className="btn bg-white border border-red-200 text-red-600 hover:bg-red-50 text-sm px-4">Cancel Order</button>
-                  </>
-                )}
-                {selectedOrder.status === 'Confirmed' && (
-                  <>
-                    <button onClick={() => handleUpdateStatus('Processing')} disabled={formSubmitting} className="btn bg-indigo-600 hover:bg-indigo-700 text-white border-none text-sm px-4">Mark Processing</button>
-                    <button onClick={() => handleUpdateStatus('Cancelled')} disabled={formSubmitting} className="btn bg-white border border-red-200 text-red-600 hover:bg-red-50 text-sm px-4">Cancel Order</button>
-                  </>
-                )}
-                {selectedOrder.status === 'Processing' && (
-                  <>
-                    <button onClick={() => handleUpdateStatus('Completed')} disabled={formSubmitting} className="btn bg-green-600 hover:bg-green-700 text-white border-none text-sm px-4 shadow-md flex items-center gap-1">
-                      <CheckCircle size={16}/> Complete Order
-                    </button>
-                    <button onClick={() => handleUpdateStatus('Cancelled')} disabled={formSubmitting} className="btn bg-white border border-red-200 text-red-600 hover:bg-red-50 text-sm px-4">Cancel Order</button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2"><ShoppingCart size={16}/> Customer</h4>
-                <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2">
-                  <p className="font-semibold text-slate-900 text-lg">{selectedOrder.customer_name}</p>
-                  {selectedOrder.customer_phone && <p className="text-sm text-slate-600 flex items-center gap-2">📞 {selectedOrder.customer_phone}</p>}
-                  {selectedOrder.customer_email && <p className="text-sm text-slate-600 flex items-center gap-2">✉️ {selectedOrder.customer_email}</p>}
-                  {selectedOrder.customer_address && <p className="text-sm text-slate-600 flex items-start gap-2 mt-2 pt-2 border-t border-slate-100"><MapPin size={16} className="shrink-0 mt-0.5 text-slate-400"/> {selectedOrder.customer_address}</p>}
-                </div>
-              </div>
-              
-              <div>
-                <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2"><Clock size={16}/> Timeline</h4>
-                <div className="p-4 bg-white border border-slate-200 rounded-xl">
-                  <div className="relative border-l-2 border-slate-200 pl-4 ml-2 space-y-4">
-                    <div className="relative">
-                      <div className="absolute w-3 h-3 bg-slate-300 rounded-full -left-[23px] top-1"></div>
-                      <p className="text-sm font-medium text-slate-900">Order Created</p>
-                      <p className="text-xs text-slate-500">{new Date(selectedOrder.created_at).toLocaleString()}</p>
-                    </div>
-                    {selectedOrder.updated_at !== selectedOrder.created_at && (
-                      <div className="relative">
-                        <div className={`absolute w-3 h-3 rounded-full -left-[23px] top-1 ${selectedOrder.status === 'Completed' ? 'bg-green-500' : selectedOrder.status === 'Cancelled' ? 'bg-red-500' : 'bg-primary-500'}`}></div>
-                        <p className="text-sm font-medium text-slate-900">Status: {selectedOrder.status}</p>
-                        <p className="text-xs text-slate-500">{new Date(selectedOrder.updated_at).toLocaleString()}</p>
+                    {/* Customer & Address Details */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-600 mt-2">
+                      <div className="flex items-center gap-2">
+                        <Phone size={14} className="text-slate-400 shrink-0" />
+                        <span className="font-medium text-slate-900">{order.customer_phone || 'N/A'}</span>
+                        {order.customer_phone && (
+                          <a 
+                            href={`tel:${order.customer_phone}`} 
+                            className="text-primary-600 hover:underline text-[11px] font-semibold"
+                          >
+                            Call
+                          </a>
+                        )}
+                        {order.customer_phone && (
+                          <a 
+                            href={`https://wa.me/91${order.customer_phone.replace(/\D/g, '')}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-emerald-600 hover:underline text-[11px] font-semibold"
+                          >
+                            WhatsApp
+                          </a>
+                        )}
                       </div>
+
+                      <div className="flex items-center gap-2">
+                        <MapPin size={14} className="text-slate-400 shrink-0" />
+                        <span className="truncate" title={order.delivery_address}>
+                          {order.delivery_address || 'Customer pickup / Counter order'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Products Preview */}
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Items:</span>
+                      {items.length === 0 ? (
+                        <span className="text-xs text-slate-500 italic">No specific item details</span>
+                      ) : (
+                        items.map((it, idx) => (
+                          <span 
+                            key={it.id || idx}
+                            className="inline-flex items-center gap-1 bg-slate-100 text-slate-800 text-xs px-2 py-0.5 rounded-md"
+                          >
+                            <span className="font-bold text-primary-600">{it.quantity}x</span> {it.product_name}
+                            <span className="text-slate-400 font-normal">₹{it.price}</span>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: Amount & Workflow Action Buttons */}
+                  <div className="flex lg:flex-col items-center lg:items-end justify-between border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100 shrink-0 gap-3">
+                    <div className="text-left lg:text-right">
+                      <p className="text-xs text-slate-400 font-medium">Total Amount</p>
+                      <h4 className="text-xl font-extrabold text-slate-900">
+                        ₹{Number(order.total_amount).toLocaleString('en-IN')}
+                      </h4>
+                      <p className="text-[11px] text-slate-500">{itemCount} items</p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* View Details Modal Trigger */}
+                      <button
+                        onClick={() => setSelectedOrder(order)}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1"
+                      >
+                        <Eye size={14} /> Details
+                      </button>
+
+                      {/* Next Step Transition Button */}
+                      {config.next && (
+                        <button
+                          onClick={() => handleUpdateStatus(order.id, config.next)}
+                          disabled={updatingOrderId === order.id}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm ${config.nextBtn}`}
+                        >
+                          {config.nextIcon && <config.nextIcon size={14} />}
+                          {updatingOrderId === order.id ? 'Updating...' : config.nextLabel}
+                        </button>
+                      )}
+
+                      {/* Cancel Button (Only if not delivered) */}
+                      {order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Are you sure you want to cancel order #${order.order_number}?`)) {
+                              handleUpdateStatus(order.id, 'Cancelled');
+                            }
+                          }}
+                          className="px-2 py-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-medium transition-colors"
+                          title="Cancel Order"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ====================================================================== */}
+      {/* ORDER DETAILS MODAL */}
+      {/* ====================================================================== */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-primary-100 text-primary-700 rounded-xl">
+                  <ShoppingCart size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Order #{selectedOrder.order_number || selectedOrder.id.substring(0, 8)}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Received on {new Date(selectedOrder.created_at).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-200/50"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              
+              {/* Status Timeline */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-3">
+                  Order Status Progress
+                </span>
+                <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                  {['Confirmed', 'Preparing', 'Out for Delivery', 'Delivered'].map((st, idx) => {
+                    const statuses = ['Confirmed', 'Preparing', 'Out for Delivery', 'Delivered'];
+                    const currentIdx = statuses.indexOf(selectedOrder.status);
+                    const isPassed = currentIdx >= idx;
+                    const isCurrent = selectedOrder.status === st;
+
+                    return (
+                      <div key={st} className="flex flex-col items-center">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mb-1 transition-colors ${
+                          isCurrent 
+                            ? 'bg-primary-600 text-white ring-4 ring-primary-100' 
+                            : isPassed 
+                            ? 'bg-emerald-500 text-white' 
+                            : 'bg-slate-200 text-slate-500'
+                        }`}>
+                          {isPassed ? '✓' : idx + 1}
+                        </div>
+                        <span className={`text-[11px] ${isCurrent ? 'font-bold text-primary-700' : 'text-slate-600'}`}>
+                          {st}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Customer & Delivery Box */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                    Customer Information
+                  </span>
+                  <p className="text-sm font-bold text-slate-900">{selectedOrder.customer_name || 'Customer'}</p>
+                  <p className="text-xs text-slate-600 mt-1 flex items-center gap-1.5">
+                    <Phone size={13} className="text-slate-400" />
+                    {selectedOrder.customer_phone || 'Phone not provided'}
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    {selectedOrder.customer_phone && (
+                      <a 
+                        href={`tel:${selectedOrder.customer_phone}`}
+                        className="px-2.5 py-1 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        Call Customer
+                      </a>
+                    )}
+                    {selectedOrder.customer_phone && (
+                      <a 
+                        href={`https://wa.me/91${selectedOrder.customer_phone.replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                      >
+                        WhatsApp
+                      </a>
                     )}
                   </div>
                 </div>
-              </div>
-            </div>
 
-            <div>
-              <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-2"><Package size={16}/> Order Items</h4>
-              <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Product</th>
-                      <th className="px-4 py-3 font-medium text-center">Qty</th>
-                      <th className="px-4 py-3 font-medium text-right">Price</th>
-                      <th className="px-4 py-3 font-medium text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {selectedOrder.order_items.map(item => (
-                      <tr key={item.id}>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-900">{item.products?.name || 'Deleted Product'}</p>
-                          <p className="text-xs text-slate-500">{item.products?.sku}</p>
-                        </td>
-                        <td className="px-4 py-3 text-center font-medium">{item.quantity}</td>
-                        <td className="px-4 py-3 text-right text-slate-600">₹{parseFloat(item.unit_price).toLocaleString('en-IN')}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-slate-900">₹{parseFloat(item.total_price).toLocaleString('en-IN')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="bg-slate-50 p-4 border-t border-slate-200 flex flex-col items-end space-y-1">
-                  <div className="flex justify-between w-48 text-sm text-slate-600">
-                    <span>Subtotal</span>
-                    <span className="font-medium">₹{parseFloat(selectedOrder.subtotal).toLocaleString('en-IN')}</span>
-                  </div>
-                  {parseFloat(selectedOrder.discount) > 0 && (
-                    <div className="flex justify-between w-48 text-sm text-slate-600">
-                      <span>Discount</span>
-                      <span className="font-medium text-green-600">-₹{parseFloat(selectedOrder.discount).toLocaleString('en-IN')}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between w-48 pt-2 border-t border-slate-200 mt-2">
-                    <span className="font-bold text-slate-800">Total</span>
-                    <span className="font-bold text-primary-600">₹{parseFloat(selectedOrder.total_amount).toLocaleString('en-IN')}</span>
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                    Delivery & Payment
+                  </span>
+                  <p className="text-xs text-slate-700 flex items-start gap-1.5">
+                    <MapPin size={13} className="text-slate-400 shrink-0 mt-0.5" />
+                    <span>{selectedOrder.delivery_address || 'Local store pickup'}</span>
+                  </p>
+                  <div className="mt-3 text-xs text-slate-600">
+                    <span className="font-semibold text-slate-900">Payment:</span> {selectedOrder.payment_method || 'Cash on Delivery'}
                   </div>
                 </div>
               </div>
+
+              {/* Order Items Table */}
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 mb-3">Order Items</h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                      <tr>
+                        <th className="p-3">Product Name</th>
+                        <th className="p-3 text-center">Qty</th>
+                        <th className="p-3 text-right">Price</th>
+                        <th className="p-3 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(selectedOrder.order_items || []).map((item, idx) => (
+                        <tr key={item.id || idx}>
+                          <td className="p-3 font-medium text-slate-900">{item.product_name}</td>
+                          <td className="p-3 text-center font-bold text-primary-600">{item.quantity}</td>
+                          <td className="p-3 text-right text-slate-600">₹{item.price}</td>
+                          <td className="p-3 text-right font-bold text-slate-900">
+                            ₹{(Number(item.price) * Number(item.quantity)).toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
+                      <tr>
+                        <td colSpan="3" className="p-3 text-right text-slate-700">Total Amount:</td>
+                        <td className="p-3 text-right text-base text-emerald-600">
+                          ₹{Number(selectedOrder.total_amount).toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
             </div>
-            
-            <div className="pt-2 flex justify-end border-t border-slate-100">
-               <button onClick={closeModal} className="btn bg-white border border-slate-200 text-slate-700">Close</button>
+
+            {/* Modal Footer (Action Controls) */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Change Status:
+              </span>
+              <div className="flex items-center gap-2">
+                {['Confirmed', 'Preparing', 'Out for Delivery', 'Delivered'].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => handleUpdateStatus(selectedOrder.id, st)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      selectedOrder.status === st 
+                        ? 'bg-slate-900 text-white' 
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
             </div>
+
           </div>
-        )}
-      </Modal>
+        </div>
+      )}
 
     </Layout>
   );
