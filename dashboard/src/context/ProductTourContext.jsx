@@ -145,16 +145,9 @@ export const ProductTourProvider = ({ children }) => {
       const dismissed = localStorage.getItem(getDismissedKey(uid));
       const justRegistered = localStorage.getItem('inventoryx_just_registered') === 'true';
 
-      // Runs automatically ONLY once after account creation
-      if (justRegistered || (!completed && !dismissed)) {
-        // Clear registration flag so it doesn't trigger again
+      // Don't auto-launch blocking tour on initial login; let user click 'Take Tour' when ready
+      if (justRegistered) {
         localStorage.removeItem('inventoryx_just_registered');
-
-        const timer = setTimeout(() => {
-          setIsFirstTimePromptOpen(false);
-          startTour(0);
-        }, 1000);
-        return () => clearTimeout(timer);
       }
     });
   }, []);

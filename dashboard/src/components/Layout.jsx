@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { 
   LayoutDashboard, 
@@ -35,6 +35,7 @@ const formatMarkdown = (text) => {
 };
 
 const Sidebar = ({ profile }) => {
+  const navigate = useNavigate();
   const isDealer = (profile?.role || localStorage.getItem('user_role')) === 'dealer';
   let tour = null;
   try {
@@ -56,9 +57,9 @@ const Sidebar = ({ profile }) => {
   ];
 
   return (
-    <div className="w-64 bg-white border-r border-slate-200 h-screen flex flex-col fixed left-0 top-0">
+    <div className="w-64 bg-white border-r border-slate-200 h-screen flex flex-col fixed left-0 top-0 z-30 shadow-xs">
       <div className="p-6">
-        <h1 className="text-2xl font-bold text-primary-600 flex items-center gap-2">
+        <h1 className="text-2xl font-bold text-primary-600 flex items-center gap-2 cursor-pointer" onClick={() => navigate('/')}>
           <BrainCircuit className="text-primary-500" />
           InventoryX <span className="text-slate-800">AI</span>
         </h1>
@@ -73,8 +74,11 @@ const Sidebar = ({ profile }) => {
               key={item.name}
               to={item.path}
               data-tour={tourKey}
+              onClick={(e) => {
+                navigate(item.path);
+              }}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer select-none ${
                   isActive 
                     ? 'bg-primary-50 text-primary-700' 
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
